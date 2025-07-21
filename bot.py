@@ -1,6 +1,7 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+    ApplicationBuilder, CommandHandler, MessageHandler, filters,
+    ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 from dotenv import load_dotenv
 import requests
@@ -17,7 +18,12 @@ def is_valid_vin(vin: str) -> bool:
     return bool(re.fullmatch(r"^[A-HJ-NPR-Z0-9]{17}$", vin))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! 🚗 Enter your VIN (17 characters):")
+    keyboard = [[InlineKeyboardButton("🔄 Get Random VIN", callback_data="get_random_vin")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "Welcome! 🚗\nSend me a VIN (17 characters) to decode it or tap below:",
+        reply_markup=reply_markup
+    )
     return ASK_VIN
 
 async def handle_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -35,12 +41,13 @@ async def handle_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         make = next((i['Value'] for i in results if i['Variable'] == "Make"), "N/A")
         model = next((i['Value'] for i in results if i['Variable'] == "Model"), "N/A")
         year = next((i['Value'] for i in results if i['Variable'] == "Model Year"), "N/A")
-        reply = f"🔎 VIN Details:\nMake: {make}\nModel: {model}\nYear: {year}"
+        reply = f"🔎 VIN Details:\n🚗 Make: {make}\n🚙 Model: {model}\n📅 Year: {year}"
     else:
-        reply = "❌ API Error. Please try later."
+        reply = "❌ Failed to decode VIN."
 
-    await update.message.reply_text(reply)
-    await update.message.reply_text("Do you want to check another VIN? (yes/no)")
+    keyboard = [[InlineKeyboardButton("🔄 Get Random VIN", callback_data="get_random_vin")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(reply, reply_markup=reply_markup)
     return ASK_AGAIN
 
 async def handle_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,18 +56,51 @@ async def handle_yes_no(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please enter the next VIN:")
         return ASK_VIN
     elif answer in ['no', 'n']:
-        await update.message.reply_text("Goodbye 👋")
+        await update.message.reply_text("Okay, goodbye! 👋")
         return ConversationHandler.END
     else:
-        await update.message.reply_text("❓ Reply 'yes' or 'no'.")
+        await update.message.reply_text("❓ Reply with 'yes' or 'no'.")
         return ASK_AGAIN
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Session ended. Bye 👋")
     return ConversationHandler.END
 
+async def random_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        vin_response = requests.get("https://randomvin.com/getvin.php?type=random")
+        random_vin = vin_response.text.strip()
+        await update.message.reply_text(f"🔑 Random VIN: {random_vin}\nFetching details...")
+
+        url = f"https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/{random_vin}?format=json"
+        response = requests.get(url)
+
+        if response.status_code == 200:
+            data = response.json()
+            results = data.get("Results", [])
+            make = next((i['Value'] for i in results if i['Variable'] == "Make"), "N/A")
+            model = next((i['Value'] for i in results if i['Variable'] == "Model"), "N/A")
+            year = next((i['Value'] for i in results if i['Variable'] == "Model Year"), "N/A")
+            reply = f"🚗 Make: {make}\n🚙 Model: {model}\n📅 Year: {year}"
+        else:
+            reply = "❌ Failed to decode VIN."
+
+    except Exception as e:
+        reply = f"❌ Error fetching VIN: {e}"
+
+    keyboard = [[InlineKeyboardButton("🔄 Get Another VIN", callback_data="get_random_vin")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(reply, reply_markup=reply_markup)
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "get_random_vin":
+        await random_vin(update, context)
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -69,9 +109,10 @@ if __name__ == "__main__":
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+
     app.add_handler(conv_handler)
+    app.add_handler(CommandHandler("randomvin", random_vin))
+    app.add_handler(CallbackQueryHandler(button_callback))
+
     print("✅ Bot is running...")
     app.run_polling()
-
-
-
