@@ -66,12 +66,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Session ended. Bye 👋")
     return ConversationHandler.END
 
-async def random_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def random_vin_logic():
+    """Separate function to handle the VIN fetching logic"""
     try:
         vin_response = requests.get("https://randomvin.com/getvin.php?type=random")
         random_vin = vin_response.text.strip()
-        await update.message.reply_text(f"🔑 Random VIN: {random_vin}\nFetching details...")
-
+        
         url = f"https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/{random_vin}?format=json"
         response = requests.get(url)
 
@@ -81,13 +81,17 @@ async def random_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             make = next((i['Value'] for i in results if i['Variable'] == "Make"), "N/A")
             model = next((i['Value'] for i in results if i['Variable'] == "Model"), "N/A")
             year = next((i['Value'] for i in results if i['Variable'] == "Model Year"), "N/A")
-            reply = f"🚗 Make: {make}\n🚙 Model: {model}\n📅 Year: {year}"
+            reply = f"🔑 Random VIN: {random_vin}\n🚗 Make: {make}\n🚙 Model: {model}\n📅 Year: {year}"
         else:
-            reply = "❌ Failed to decode VIN."
+            reply = f"🔑 Random VIN: {random_vin}\n❌ Failed to decode VIN."
 
     except Exception as e:
         reply = f"❌ Error fetching VIN: {e}"
+    
+    return reply
 
+async def random_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    reply = await random_vin_logic()
     keyboard = [[InlineKeyboardButton("🔄 Get Another VIN", callback_data="get_random_vin")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(reply, reply_markup=reply_markup)
@@ -95,8 +99,13 @@ async def random_vin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
     if query.data == "get_random_vin":
-        await random_vin(update, context)
+        reply = await random_vin_logic()
+        keyboard = [[InlineKeyboardButton("🔄 Get Another VIN", callback_data="get_random_vin")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Use query.edit_message_text or query.message.reply_text for callback queries
+        await query.message.reply_text(reply, reply_markup=reply_markup)
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
